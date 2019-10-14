@@ -1,0 +1,122 @@
+# 预算桶模型
+
+
+
+1. 定义
+
+   > 总桶定义：表示总预算桶的模型
+   >
+   > 分桶定义：表示用于分桶模型， 统计使用
+   >
+   > 分桶：用于主流程中扣减的分桶，因为性能考虑，使用redis或者其他内存模型进行扣减
+   >
+   > 分桶列表:预算桶中预算可用分桶的集合，不可用分桶的集合
+
+2. 理念：
+
+   > 空间换取时间
+
+3. 功能列表
+
+   > 预算创建
+   >
+   > 预算追加
+   >
+   > 预算使用
+   >
+   > 预算查看
+
+4. 数据模型
+
+   ```sql
+   ---总预算桶定义--
+   create table budget_management_bucket(
+    `id` bigint(20) unsigned auto_increment comment '预算id',
+     `gl_code` varchar(20) comment '科目',
+     `total_quantity` bigint(20) commment '总量',
+     `out_quantity` bigint(20) comment '已发放量',
+     `sharding_quantity` bigint(20) comment '单个分桶最多申请预算量',
+     `bucket_quantity` int comment '初始分桶数量',
+     `adjust_cnt` int comment '分桶预算最多可以调整次数',
+     `type` varchar(20) comment '预算应用场景:大促,日常',
+      `type_rule` longtext comment '子预算桶预算申请规则',
+     `status` varchar(20) comment '状态：未生效，已生效，已失效',
+     `created_at` datetime comment '创建时间',
+     `updated_at` datetime comment '更新时间',
+      primary_key (id) 
+   )
+   ----子预算桶定义----
+   create table sharding_budget_management_buckect(
+   	`id` bigint(20) unsigned auto_increment comment '子预算桶id',
+       `budget_id` bigint(20) comment '预算id',
+       `sharding_bucket_key` varchar(150) comment '分桶key',
+       `out_quantity` bigint(20) comment '已经申请的总量',
+       `sharding_quantity` bigint(20) comment '单个分桶最多申请预算量',
+       `out_cnt` int comment '分桶已经申请次数',
+       `status` varchar(20) comment '在线，离线',
+       `created_at` datetime comment '创建时间',
+    	`updated_at` datetime comment '更新时间',
+      	primary_key (id) 
+   )
+   
+   -------内存key-value结构-----------
+   分桶：
+   	key:分桶key
+   	value:当前剩余预算量
+   	
+   分桶列表:
+   	key: 分桶列表key
+   	value :在线的分桶，离线的列表要即时删除
+   
+   ```
+
+5. 业务架构
+
+   ![image-20181212103220003](/Users/tony/Library/Application Support/typora-user-images/image-20181212103220003.png)
+
+6. 创建预算
+
+   ![image-20181211173936441](/Users/tony/Documents/markdown/image-20181211173936441.png)
+
+7. 预算扣减
+
+   ![image-20181211175910874](/Users/tony/Documents/markdown/image-20181211175910874.png)
+
+8. 申请预算
+
+   ![image-20181212104656177](/Users/tony/Library/Application Support/typora-user-images/image-20181212104656177.png)
+
+9. 分桶下线
+
+   ![image-20181212101741550](/Users/tony/Library/Application Support/typora-user-images/image-20181212101741550.png)
+
+10. 回滚预算
+
+   ![image-20181212101811630](/Users/tony/Library/Application Support/typora-user-images/image-20181212101811630.png)
+
+11. 碎片回收
+
+    ![image-20181212155811947](/Users/tony/Library/Application Support/typora-user-images/image-20181212155811947.png)
+
+12. 全局锁相关解释
+
+    > 扣减预算的时候不用添加全局锁，redis本来就是单线程，不需要通过锁的方式扣减
+    >
+    > 申请预算，分桶下线因为可能涉及到并发的问题，需要添加分桶的全局锁， 不让重复的操作
+
+13. 预算应用场景
+
+    > 分为大促模式和日常模式，大促模式一次性分配完所有的预算。日常模式涉及到预算的压缩，比如1年的可以压缩到每天分配，那么假如1年的预算是365万，那么每天的预算可以压缩到1万，预算申请的时候控制。
+    >
+    > 日常模式中会存在子预算桶预算申请规则，规则可配置：与日期强相关(比如整点可以申请，每天可以申请，每月可以申请),与日期不相关(用完即可申请)
+
+14. 为什么要使用分桶
+
+    > 上面讲到了空间换取时间的概念，我们尽量避免热点，分桶可以降低集中请求某一点造成的压力，假如一个redis库的tps可以达到50000，那我们使用10分桶，分别放到10个redis库中，并行处理的时候我们可以达到500000的tps，方便以后扩展。同时我们可以不局限redis，或者使用其他类型的数据库，不局限redis，不局限noSql。如果要求不高的情况，我们可以将分桶尽量扩大，理论上关系型数据库在分桶够大的时候，也是可以满足相应的指标的。
+
+15. 特殊场景算法
+
+    > 假如现在有10个分桶，每个分桶有8个数据，现在我有20个数据待扣减，这个时候怎么扣减，
+
+16. 
+
